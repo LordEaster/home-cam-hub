@@ -1,0 +1,117 @@
+name: home-cam
+services:
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: home-cam-nginx
+    restart: unless-stopped
+    ports:
+      - "7701:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - home-cam-network
+
+  # Frontend (React/Vite)
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: home-cam-frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - home-cam-network
+
+  # Backend API (NestJS)
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: home-cam-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://home-cam:${DB_PASSWORD}@postgres:5432/home-cam?schema=public
+      - JWT_SECRET=${JWT_SECRET}
+      - TAPO_EMAIL=${TAPO_EMAIL}
+      - TAPO_PASSWORD=${TAPO_PASSWORD}
+      - TAPO_CAMERA_USERNAME=${TAPO_CAMERA_USERNAME}
+      - TAPO_CAMERA_PASSWORD=${TAPO_CAMERA_PASSWORD}
+      - MEDIAMTX_API_URL=http://mediamtx:9997
+      - MEDIAMTX_HLS_URL=http://mediamtx:8888
+      - RECORDINGS_PATH=/recordings
+    volumes:
+      - E:/recordings:/recordings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - home-cam-network
+
+  # MediaMTX - RTSP/HLS/WebRTC Streaming Server
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: home-cam-mediamtx
+    restart: unless-stopped
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - E:/recordings:/recordings
+    ports:
+      - "8554:8554"  # RTSP
+      - "8888:8888"  # HLS
+      - "8889:8889"  # WebRTC HTTP
+      - "8189:8189/udp"  # WebRTC ICE/UDP
+    networks:
+      - home-cam-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: home-cam-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=home-cam
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=home-cam
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - home-cam-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U home-cam"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  recordings:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${RECORDINGS_HOST_PATH:-./recordings}
+
+networks:
+  home-cam-network:
+    driver: bridge

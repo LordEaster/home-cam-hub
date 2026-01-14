@@ -1,0 +1,95 @@
+# MediaMTX Configuration for HomeCam Hub
+# Documentation: https://github.com/bluenviron/mediamtx
+
+###############################################
+# General settings
+
+# Log level (debug, info, warn, error)
+logLevel: info
+logDestinations: [stdout]
+
+# Authentication - allow API access from Docker network
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path:
+      - action: read
+        path:
+      - action: playback
+        path:
+      - action: api
+      - action: metrics
+
+# API server for stream management
+api: yes
+apiAddress: :9997
+
+# Metrics for monitoring
+metrics: yes
+metricsAddress: :9998
+
+###############################################
+# RTSP server settings
+
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp, udp]
+
+# Authentication methods
+rtspAuthMethods: [basic, digest]
+
+###############################################
+# HLS server settings (for web playback)
+# Configured for Low-Latency (LL-HLS)
+
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: no
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsAllowOrigins: ['*']
+
+webrtc: no
+webrtcAddress: :8889
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcLocalUDPAddress: :8189
+
+###############################################
+# Path configuration
+# Paths are dynamically configured via API by the backend
+
+pathDefaults:
+  # Source settings
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+  sourceProtocol: tcp
+  
+  # Recording settings
+  record: no
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 1h
+  recordDeleteAfter: 168h  # 7 days retention
+  
+  # Readers settings
+  maxReaders: 10
+
+
+# Paths will be added dynamically by the backend API
+# Example path structure:
+# paths:
+#   camera_1:
+#     source: rtsp://192.168.1.100:554/stream1
+#     record: yes
+#   camera_2:
+#     source: rtsp://192.168.1.101:554/stream1
+#     record: yes

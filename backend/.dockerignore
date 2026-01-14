@@ -1,0 +1,10 @@
+node_modules
+dist
+prisma.config.js
+prisma.config.ts
+prisma.config.mjs
+.env
+build_debug.log
+clean.bat
+.git
+.gitignore

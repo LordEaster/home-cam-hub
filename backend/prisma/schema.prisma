@@ -1,0 +1,214 @@
+// HomeCam Hub - Prisma Schema
+// All configuration stored in database (except video recordings)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User accounts
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  displayName  String    @map("display_name")
+  email        String?   @unique
+  role         UserRole  @default(USER)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  permissions   Permission[]
+  auditLogs     AuditLog[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+// Refresh tokens for JWT auth
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String    @map("user_id")
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// Camera configurations
+model Camera {
+  id             String     @id @default(uuid())
+  name           String
+  type           CameraType
+  model          String?
+  ip             String
+  port           Int?
+  username       String?
+  password       String?
+  rtspMainStream String?    @map("rtsp_main_stream")
+  rtspSubStream  String?    @map("rtsp_sub_stream")
+
+  // Features supported by this camera
+  hasPtz     Boolean @default(false) @map("has_ptz")
+  hasAudio   Boolean @default(false) @map("has_audio")
+  hasPresets Boolean @default(false) @map("has_presets")
+
+  // Recording settings
+  recordingMode RecordingMode @default(CONTINUOUS) @map("recording_mode")
+  isRecording   Boolean       @default(true) @map("is_recording")
+
+  // Status
+  isOnline   Boolean   @default(false) @map("is_online")
+  lastSeenAt DateTime? @map("last_seen_at")
+
+  // Display order (null = use default ordering by name)
+  sortOrder Int? @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  permissions Permission[]
+  presets     CameraPreset[]
+  recordings  Recording[]
+  auditLogs   AuditLog[]
+
+  @@unique([ip, port])
+  @@map("cameras")
+}
+
+enum CameraType {
+  TAPO
+  ONVIF
+  GENERIC
+}
+
+enum RecordingMode {
+  CONTINUOUS
+  MOTION
+  HYBRID
+  OFF
+}
+
+// PTZ Presets
+model CameraPreset {
+  id          String   @id @default(uuid())
+  cameraId    String   @map("camera_id")
+  name        String
+  presetToken String?  @map("preset_token") // ONVIF preset token
+  pan         Float?
+  tilt        Float?
+  zoom        Float?
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  camera Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  @@unique([cameraId, name])
+  @@map("camera_presets")
+}
+
+// Per-user, per-camera permissions
+model Permission {
+  id       String @id @default(uuid())
+  userId   String @map("user_id")
+  cameraId String @map("camera_id")
+
+  // Permission flags
+  canViewLive Boolean @default(false) @map("can_view_live")
+  canPlayback Boolean @default(false) @map("can_playback")
+  canControl  Boolean @default(false) @map("can_control")
+  canExport   Boolean @default(false) @map("can_export")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  camera Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cameraId])
+  @@map("permissions")
+}
+
+// Recording metadata (video files stored on disk)
+model Recording {
+  id        String    @id @default(uuid())
+  cameraId  String    @map("camera_id")
+  filePath  String    @map("file_path")
+  startTime DateTime  @map("start_time")
+  endTime   DateTime? @map("end_time")
+  duration  Int? // seconds
+  fileSize  BigInt?   @map("file_size") // bytes
+  hasMotion Boolean   @default(false) @map("has_motion")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  camera Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  @@index([cameraId, startTime])
+  @@index([startTime])
+  @@map("recordings")
+}
+
+// Audit logs for security
+model AuditLog {
+  id        String      @id @default(uuid())
+  userId    String?     @map("user_id")
+  cameraId  String?     @map("camera_id")
+  action    AuditAction
+  details   Json?
+  ipAddress String?     @map("ip_address")
+  userAgent String?     @map("user_agent")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  camera Camera? @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([cameraId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  VIEW_LIVE
+  PLAYBACK
+  EXPORT_CLIP
+  PTZ_CONTROL
+  PRESET_GOTO
+  CAMERA_CREATE
+  CAMERA_UPDATE
+  CAMERA_DELETE
+  USER_CREATE
+  USER_UPDATE
+  USER_DELETE
+  PERMISSION_UPDATE
+}
+
+// System settings (key-value store)
+model SystemSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
