@@ -3,6 +3,7 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { SetPermissionsDto } from './dto/set-permissions.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -54,6 +55,27 @@ export class UsersController {
       userAgent,
     );
     return user;
+  }
+
+  @Post('change-password')
+  async changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    await this.usersService.changePassword(user.id, dto);
+    
+    // Log audit event
+    // Note: We don't log the password itself
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+
+    await this.auditService.log(
+      user.id,
+      null,
+      AuditAction.USER_UPDATE,
+      { action: 'change_password', userId: user.id },
+      ipAddress,
+      userAgent,
+    );
+
+    return { message: 'Password changed successfully' };
   }
 
   @Patch(':id')

@@ -112,8 +112,7 @@ home-cam-hub/
 
 ## 🚧 Roadmap & Known Limitations
 
--   [ ] **User Profile Management:** Change password and reset password functionality is not yet implemented.
--   [ ] **System Settings UI:** Interface for configuring global settings (recording retention, max streams) is pending.
+
 -   [ ] **Mobile App:** Native mobile application for iOS and Android.
 -   [ ] **Cloud Backup:** Optional cloud storage integration for critical events.
 

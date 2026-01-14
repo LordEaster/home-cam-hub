@@ -1,4 +1,4 @@
-import { Home, Video, Settings, LogOut, Users2 } from "lucide-react";
+import { Home, Video, Settings, LogOut, Users2, Camera } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -62,6 +62,14 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={isActive("/settings")} tooltip="Settings">
+                  <Link to="/settings">
+                    <Settings />
+                    <span>Settings</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -74,7 +82,7 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={isActive("/admin/cameras")} tooltip="Cameras">
                     <Link to="/admin/cameras">
-                      <Settings />
+                      <Camera />
                       <span>Cameras</span>
                     </Link>
                   </SidebarMenuButton>

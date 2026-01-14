@@ -17,6 +17,11 @@ export interface CreateUserDto {
   role: string;
 }
 
+export interface ChangePasswordDto {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export const usersApi = {
   getAll: async (): Promise<User[]> => {
     const response = await client.get<User[]>('/users');
@@ -50,5 +55,9 @@ export const usersApi = {
   setPermissions: async (id: string, permissions: any[]): Promise<any> => {
     const response = await client.put(`/users/${id}/permissions`, { permissions });
     return response.data;
+  },
+
+  changePassword: async (data: ChangePasswordDto): Promise<void> => {
+    await client.post('/users/change-password', data);
   },
 };

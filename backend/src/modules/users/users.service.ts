@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { SetPermissionsDto } from './dto/set-permissions.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { User, Permission, UserRole } from '@prisma/client';
 
 type UserWithoutPassword = Omit<User, 'passwordHash'>;
@@ -138,6 +139,28 @@ export class UsersService {
 
     const { passwordHash, ...userWithoutPassword } = updated;
     return userWithoutPassword;
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new ForbiddenException('Invalid current password');
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash },
+    });
   }
 
   async delete(id: string, currentUserId: string): Promise<void> {

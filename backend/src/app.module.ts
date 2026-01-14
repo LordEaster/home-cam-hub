@@ -8,6 +8,7 @@ import { CamerasModule } from './modules/cameras/cameras.module';
 import { ControlModule } from './modules/control/control.module';
 import { PlaybackModule } from './modules/playback/playback.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -42,6 +43,7 @@ import { HealthController } from './health.controller';
     ControlModule,
     PlaybackModule,
     AuditModule,
+    SettingsModule,
   ],
   controllers: [HealthController],
 })
