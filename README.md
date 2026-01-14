@@ -1,104 +1,115 @@
 # HomeCam Hub 🎥
 
-A self-hosted, Docker-based CCTV platform with NestJS backend, React frontend, and Tapo camera integration.
+A robust, self-hosted CCTV Management Platform built with NestJS, React, and MediaMTX.
 
-## Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![React](https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB)](https://reactjs.org/)
+[![NestJS](https://img.shields.io/badge/nestjs-%23E0234E.svg?style=flat&logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 
-- **Self-Hosted:** Full privacy, runs on your own hardware.
-- **Unified Dashboard:** View and control all your cameras in one place.
-- **Tapo Integration:** Seamless integration with TP-Link Tapo cameras (PTZ control, presets).
-- **ONVIF Support:** Standard support for other IP cameras.
-- **NVR Capabilities:** Continuous or motion-based recording with retention policies.
-- **Modern UI:** Responsive React frontend with dark mode.
+## ✨ Features
+
+-   **Live Streaming:** Low-latency HLS streaming via MediaMTX.
+-   **PTZ Control:** Full Pan-Tilt-Zoom control for supported cameras (Tapo/ONVIF).
+-   **Recording Playback:** visual timeline for viewing recorded footage.
+-   **User Management:** Role-based access control (Admin/User/Viewer).
+-   **Camera Management:** Easy discovery and configuration of ONVIF and Tapo devices.
+-   **Modern UI:** Responsive design built with Shadcn UI and Tailwind CSS.
+-   **Audit Logging:** Detailed tracking of user actions and system events.
+-   **Health Monitoring:** Real-time status checks for camera connectivity and stream health.
+
+## 🛠️ Tech Stack
+
+-   **Frontend:** React (Vite), TypeScript, Tailwind CSS, Shadcn UI, HLS.js
+-   **Backend:** NestJS, Prisma ORM, Passport JWT, ONVIF, FFmpeg
+-   **Database:** PostgreSQL 16
+-   **Streaming Server:** MediaMTX (formerly rtsp-simple-server)
+-   **Infrastructure:** Docker Compose, Nginx Reverse Proxy
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- Docker & Docker Compose
-- Node.js 20+ (for local development)
+-   [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed
+-   Git installed
 
-### Installation
+### Installation & Setup
 
-1.  **Clone the repository:**
+1.  **Clone the repository**
     ```bash
-    git clone https://github.com/yourusername/home-cam-hub.git
+    git clone https://github.com/lordeaster/home-cam-hub.git
     cd home-cam-hub
     ```
 
-2.  **Configure Environment:**
-    Copy the example environment file and update with your credentials:
+2.  **Environment Setup**
+    Copy the example environment file in the `infra` directory:
     ```bash
+    cd infra
     cp .env.example .env
     ```
     
-    Edit `.env` and set:
-    - `DB_PASSWORD`: Secure password for PostgreSQL.
-    - `JWT_SECRET`: Random string for authentication security.
-    - `TAPO_EMAIL` / `TAPO_PASSWORD`: Your Tapo cloud credentials (required for Tapo API).
-    - `TAPO_API_PASSWORD`: A password you choose for the internal Tapo service.
+    Edit `infra/.env` and configure your settings:
+    - `DB_PASSWORD`: Set a secure database password.
+    - `JWT_SECRET`: Generate a long random string for session security.
+    - `TAPO_EMAIL` / `TAPO_PASSWORD`: (Optional) Your Tapo Cloud cedentials for discovery.
+    - `RECORDINGS_HOST_PATH`: Absolute path on your host machine to store video recordings (e.g., `E:\recordings` on Windows or `/mnt/recordings` on Linux).
 
-3.  **Start the Application:**
-    Run the stack using Docker Compose:
+3.  **Start the Application**
+    From the `infra` directory, run:
     ```bash
-    cd infra
-    docker compose --env-file ../.env up -d --build
+    docker compose --env-file .env up -d --build
     ```
 
-4.  **Initialize Database:**
-    Once containers are running, push the schema and seed initial data:
+4.  **Initialize Database**
+    Once the containers are running (check with `docker compose ps`), initialize the schema and seed default data:
     ```bash
     docker compose exec -T backend npx prisma db push
     docker compose exec -T backend npm run prisma:seed
     ```
 
-5.  **Access the Dashboard:**
-    Open [http://localhost](http://localhost) in your browser.
-    
+5.  **Access the Dashboard**
+    Open your browser and navigate to:
+    **http://localhost:7701**
+
     **Default Credentials:**
-    - Username: `admin`
-    - Password: `changeme123`
+    -   **Email:** `admin@example.com`
+    -   **Password:** `admin123`
+    *(Please change these immediately after logging in)*
 
-## 🏗️ Architecture
+## 📂 Project Structure
 
-- **Frontend:** React, Vite, Tailwind-like CSS, HLS.js
-- **Backend:** NestJS, Prisma (PostgreSQL), Passport (JWT)
-- **Streaming:** MediaMTX (RTSP to HLS transcoding)
-- **Tapo Service:** `tapo-rest` Docker service for camera control
-
-## 🛠️ Docker Operations
-
-Manage the application with these common commands:
-
-**Start/Update Application:**
-```bash
-docker compose --env-file ../.env up -d --build
+```
+home-cam-hub/
+├── backend/                # NestJS API Server
+│   ├── src/
+│   │   ├── modules/        # Feature modules (Cameras, Auth, Users, etc.)
+│   │   └── prisma/         # Database schema and seed scripts
+│   └── Dockerfile
+├── frontend/               # React Web Application
+│   ├── src/
+│   │   ├── components/     # Reusable UI components
+│   │   ├── pages/          # Application routes
+│   │   └── api/            # API client
+│   └── Dockerfile
+├── infra/                  # Infrastructure Configuration
+│   ├── docker-compose.yml  # Container orchestration
+│   ├── mediamtx.yml        # Streaming server config
+│   └── nginx.conf          # Reverse proxy config
+└── README.md
 ```
 
-**View Logs:**
-```bash
-# Follow all logs
-docker compose logs -f
+## 🔧 Troubleshooting
 
-# Specific service (e.g., backend)
-docker compose logs -f backend
-```
+### Stream not loading?
+-   Ensure MediaMTX is running: `docker compose logs mediamtx`
+-   Check if the camera is online and reachable from the Docker network.
+-   Verify RTSP credentials in the Camera Settings.
 
-**Stop Application:**
-```bash
-docker compose down
-```
-
-**Database Maintenance:**
-```bash
-# Open Prisma Studio (Database GUI)
-# Run locally if you have Node installed:
-cd backend && npx prisma studio
-
-# Reset Database (Caution!)
-docker compose exec backend npx prisma migrate reset
-```
+### Database connection errors?
+-   Ensure the `DB_PASSWORD` in `infra/.env` matches the password used by the Postgres container.
+-   If you changed the password, you may need to delete the `postgres_data` volume to reset the DB: `docker volume rm infra_postgres_data`.
 
 ## 📄 License
 
-MIT
+Distributed under the MIT License. See `LICENSE` for more information.
