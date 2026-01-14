@@ -9,6 +9,7 @@ import { ControlModule } from './modules/control/control.module';
 import { PlaybackModule } from './modules/playback/playback.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { GatewayModule } from './modules/gateway/gateway.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -44,6 +45,7 @@ import { HealthController } from './health.controller';
     PlaybackModule,
     AuditModule,
     SettingsModule,
+    GatewayModule,
   ],
   controllers: [HealthController],
 })

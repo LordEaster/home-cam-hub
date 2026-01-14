@@ -1,22 +1,52 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Maximize2, Minimize2, Grid3X3, Smartphone } from 'lucide-react';
 import { camerasApi } from '../api/cameras';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { SOCKET_EVENTS } from '@/constants/socket-events';
+import type { CameraStatusPayload } from '@/types/socket';
 import VideoPlayer from '../components/VideoPlayer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export default function LiveViewPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [nvrMode, setNvrMode] = useState(false);
   
   const { data: cameras = [], isLoading, error } = useQuery({
     queryKey: ['cameras'],
     queryFn: camerasApi.getAll,
   });
+
+  // Real-time camera status updates via WebSocket
+  useWebSocket<CameraStatusPayload>(
+    SOCKET_EVENTS.CAMERA_STATUS,
+    (payload) => {
+      // Update camera list in real-time
+      queryClient.setQueryData(['cameras'], (oldData: any[] = []) =>
+        oldData.map((cam) =>
+          cam.id === payload.cameraId
+            ? { ...cam, isOnline: payload.status === 'online' }
+            : cam
+        )
+      );
+
+      // Show toast notification
+      const camera = cameras.find((c) => c.id === payload.cameraId);
+      if (camera) {
+        if (payload.status === 'offline') {
+          toast.error(`${camera.name} is now offline`);
+        } else {
+          toast.success(`${camera.name} is back online`);
+        }
+      }
+    }
+  );
 
   // Auto-reload at 3 AM for NVR maintenance (24/7 operation)
   useEffect(() => {

@@ -3,12 +3,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Hls from 'hls.js';
 import { camerasApi } from '../api/cameras';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { SOCKET_EVENTS } from '@/constants/socket-events';
+import type { CameraStatusPayload } from '@/types/socket';
 import { QUERY_KEYS } from '../constants';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-
-import { Loader2, Zap, Radio, Volume2, VolumeX } from 'lucide-react';
+import { Loader2, Zap, Radio, Volume2, VolumeX, RefreshCw, WifiOff } from 'lucide-react';
 
 interface VideoPlayerProps {
   cameraId: string;
@@ -23,16 +25,67 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const retryCountRef = useRef(0);
+  
   const [error, setError] = useState<string | null>(null);
   const [connectionType, setConnectionType] = useState<'webrtc' | 'hls' | null>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [cameraOffline, setCameraOffline] = useState(false);
+  const [forceReload, setForceReload] = useState(0);
 
   const { data: streamData, isLoading, error: fetchError } = useQuery({
-    queryKey: [...QUERY_KEYS.CAMERAS.STREAM(cameraId), quality],
+    queryKey: [...QUERY_KEYS.CAMERAS.STREAM(cameraId), quality, forceReload],
     queryFn: () => camerasApi.getStreamUrl(cameraId, quality),
     enabled: !playbackTime,
+    retry: false, // Don't auto-retry, we handle it manually
   });
+
+  // Listen to camera status changes via WebSocket
+  useWebSocket<CameraStatusPayload>(
+    SOCKET_EVENTS.CAMERA_STATUS,
+    (payload) => {
+      if (payload.cameraId === cameraId) {
+        if (payload.status === 'online') {
+          // Camera back online - reload stream
+          setCameraOffline(false);
+          setError(null);
+          retryCountRef.current = 0;
+          setForceReload(prev => prev + 1);
+        } else {
+          // Camera went offline
+          setCameraOffline(true);
+          setError('Camera is offline');
+          // Clean up connections
+          cleanup();
+        }
+      }
+    }
+  );
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    setIsConnecting(false);
+  }, []);
+
+  // Manual retry handler
+  const handleRetry = useCallback(() => {
+    setError(null);
+    setCameraOffline(false);
+    retryCountRef.current = 0;
+    setForceReload(prev => prev + 1);
+  }, []);
 
   // Toggle Mute
   const toggleMute = useCallback(() => {
@@ -42,25 +95,20 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
     }
   }, []);
 
-
-
   // WebRTC connection via WHEP
   const connectWebRTC = useCallback(async (streamPath: string) => {
     const video = videoRef.current;
     if (!video) return false;
 
     try {
-      // Create peer connection
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       });
       pcRef.current = pc;
 
-      // Add transceivers for receiving
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Handle incoming tracks
       pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
           video.srcObject = event.streams[0];
@@ -68,11 +116,9 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
         }
       };
 
-      // Create offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Wait for ICE gathering
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === 'complete') {
           resolve();
@@ -80,12 +126,10 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
           pc.onicegatheringstatechange = () => {
             if (pc.iceGatheringState === 'complete') resolve();
           };
-          // Timeout after 2 seconds
           setTimeout(resolve, 2000);
         }
       });
 
-      // Send offer to MediaMTX WHEP endpoint
       const whepUrl = `/webrtc/${streamPath}/whep`;
       const response = await fetch(whepUrl, {
         method: 'POST',
@@ -97,16 +141,15 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
         throw new Error(`WHEP request failed: ${response.status}`);
       }
 
-      // Set remote description
       const answerSdp = await response.text();
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
       setConnectionType('webrtc');
       setError(null);
+      setCameraOffline(false);
       return true;
     } catch (err) {
       console.error('WebRTC connection failed:', err);
-      // Clean up failed connection
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
@@ -115,32 +158,26 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
     }
   }, []);
 
-  // HLS fallback with retry logic for 404 errors
+  // HLS fallback with smart retry logic
   const connectHLS = useCallback((hlsUrl: string, retryCount: number = 0) => {
     const video = videoRef.current;
     if (!video) return;
 
-    const MAX_RETRIES = 10;
-    const BASE_DELAY = 1000; // 1 second
+    const MAX_RETRIES = 5; // Reduced from 10
+    const BASE_DELAY = 2000; // Increased to 2 seconds
 
     if (Hls.isSupported()) {
       hlsRef.current = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        
-        // Aggressive buffer management to prevent memory buildup
-        maxBufferLength: 10,           // Keep only 10 seconds ahead
-        maxMaxBufferLength: 20,         // Never exceed 20 seconds
-        backBufferLength: 0,            // Don't keep old segments (save memory)
-        
-        // Low Latency Settings
-        liveSyncDurationCount: 3,       // Target ~3 segments latency
-        liveMaxLatencyDurationCount: 10, // If too far behind, jump to live
-        maxLiveSyncPlaybackRate: 2.0,   // Speed up to 2x to catch up
-        
-        // Fragment loading optimization
-        maxBufferSize: 60 * 1000 * 1000, // 60 MB max buffer size
-        maxBufferHole: 0.5,              // Skip gaps larger than 0.5s
+        maxBufferLength: 10,
+        maxMaxBufferLength: 20,
+        backBufferLength: 0,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        maxLiveSyncPlaybackRate: 2.0,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.5,
       });
 
       hlsRef.current.loadSource(hlsUrl);
@@ -149,30 +186,31 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
       hlsRef.current.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsConnecting(false);
         setError(null);
+        setCameraOffline(false);
         retryCountRef.current = 0;
         video.play().catch(() => {});
       });
 
       hlsRef.current.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-           switch (data.type) {
+          switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              // Retry on any network error if we haven't exceeded max retries
               if (retryCount < MAX_RETRIES) {
                 setIsConnecting(true);
-                
-                // Clean up current HLS instance
                 hlsRef.current?.destroy();
                 hlsRef.current = null;
                 
-                // Exponential backoff: 1s, 2s, 4s, 8s, etc.
-                const delay = BASE_DELAY * Math.pow(2, Math.min(retryCount, 5));
+                // Exponential backoff with jitter
+                const jitter = Math.random() * 1000;
+                const delay = BASE_DELAY * Math.pow(2, Math.min(retryCount, 4)) + jitter;
+                
                 retryTimeoutRef.current = setTimeout(() => {
                   retryCountRef.current = retryCount + 1;
                   connectHLS(hlsUrl, retryCount + 1);
                 }, delay);
               } else {
-                setError('Camera stream not available. The camera may be offline or still initializing.');
+                setCameraOffline(true);
+                setError('Stream unavailable. Camera may be offline or initializing.');
                 setIsConnecting(false);
               }
               break;
@@ -180,7 +218,6 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
               hlsRef.current?.recoverMediaError();
               break;
             default:
-              // Cannot recover
               setError('Failed to load video stream');
               setIsConnecting(false);
               hlsRef.current?.destroy();
@@ -194,16 +231,18 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
       video.src = hlsUrl;
       video.addEventListener('loadedmetadata', () => {
         setIsConnecting(false);
+        setCameraOffline(false);
         video.play().catch(() => {});
       });
       video.addEventListener('error', () => {
         if (retryCount < MAX_RETRIES) {
           setIsConnecting(true);
-          const delay = BASE_DELAY * Math.pow(2, Math.min(retryCount, 5));
+          const delay = BASE_DELAY * Math.pow(2, Math.min(retryCount, 4));
           retryTimeoutRef.current = setTimeout(() => {
             connectHLS(hlsUrl, retryCount + 1);
           }, delay);
         } else {
+          setCameraOffline(true);
           setError('Camera stream not available');
           setIsConnecting(false);
         }
@@ -221,68 +260,48 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
     if (!video || !streamData) return;
 
     const connect = async () => {
-      // Extract stream path from HLS URL (e.g., /stream/{path}/index.m3u8 -> {path})
       const hlsUrl = streamData.hlsUrl;
       const pathMatch = hlsUrl.match(/\/stream\/([^/]+)\//);
       const streamPath = pathMatch ? pathMatch[1] : cameraId;
 
-      // Try WebRTC first if preferred
       if (preferWebRTC) {
         const webrtcSuccess = await connectWebRTC(streamPath);
         if (webrtcSuccess) return;
         console.log('WebRTC failed, falling back to HLS');
       }
 
-      // Fallback to HLS
       connectHLS(hlsUrl);
     };
 
     connect();
 
-    // Auto-recovery interval: check if stuck or far behind live
-    // More aggressive cleanup to prevent buffer buildup
+    // Auto-recovery interval
     const recoveryInterval = setInterval(() => {
-        if (video && !video.paused && !video.ended && video.readyState > 2) {
-          const hls = hlsRef.current;
-          
-          // Jump to live if latency is too high (> 10 seconds)
-          if (hls && hls.latency > 10) {
-            if (video.buffered.length > 0) {
-              video.currentTime = video.buffered.end(video.buffered.length - 1) - 1;
-            }
-          }
-          
-          // Aggressive buffer cleanup: if we have more than 30 seconds buffered, clear old data
+      if (video && !video.paused && !video.ended && video.readyState > 2) {
+        const hls = hlsRef.current;
+        
+        if (hls && hls.latency > 10) {
           if (video.buffered.length > 0) {
-            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-            const bufferedAmount = bufferedEnd - video.currentTime;
-            
-            if (bufferedAmount > 30) {
-              // Jump closer to live edge to trigger buffer cleanup
-              video.currentTime = bufferedEnd - 5;
-            }
+            video.currentTime = video.buffered.end(video.buffered.length - 1) - 1;
           }
         }
-    }, 3000); // Check every 3 seconds
+        
+        if (video.buffered.length > 0) {
+          const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+          const bufferedAmount = bufferedEnd - video.currentTime;
+          
+          if (bufferedAmount > 30) {
+            video.currentTime = bufferedEnd - 5;
+          }
+        }
+      }
+    }, 3000);
 
     return () => {
       clearInterval(recoveryInterval);
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = null;
-      }
-      retryCountRef.current = 0;
-      setIsConnecting(false);
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-      if (pcRef.current) {
-        pcRef.current.close();
-        pcRef.current = null;
-      }
+      cleanup();
     };
-  }, [streamData, cameraId, preferWebRTC, connectWebRTC, connectHLS]);
+  }, [streamData, cameraId, preferWebRTC, connectWebRTC, connectHLS, cleanup]);
 
   if (isLoading || isConnecting) {
     return (
@@ -294,7 +313,7 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
           </p>
           {isConnecting && retryCountRef.current > 0 && (
             <p className="text-xs text-muted-foreground mt-1">
-              Attempt {retryCountRef.current}/10
+              Attempt {retryCountRef.current}/5
             </p>
           )}
         </div>
@@ -302,11 +321,45 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
     );
   }
 
-  if (fetchError || error) {
+  if (fetchError || (error && cameraOffline)) {
+    return (
+      <Card className="w-full aspect-video flex items-center justify-center bg-muted/50">
+        <div className="text-center px-4 space-y-4">
+          <WifiOff className="h-16 w-16 text-muted-foreground mx-auto opacity-50" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Camera Offline</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {error || 'Stream is currently unavailable'}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetry}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Retry Connection
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  if (error) {
     return (
       <Card className="w-full aspect-video flex items-center justify-center bg-destructive/10 border-destructive/20">
-        <div className="text-center px-4">
-          <p className="text-destructive font-medium">{error || 'Failed to load stream'}</p>
+        <div className="text-center px-4 space-y-3">
+          <p className="text-destructive font-medium text-sm">{error}</p>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleRetry}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
         </div>
       </Card>
     );
@@ -320,14 +373,13 @@ export default function VideoPlayer({ cameraId, playbackTime, preferWebRTC = fal
         muted
         playsInline
         autoPlay
-        // No controls attribute for clean look
       />
       
       {/* Custom Mute Toggle */}
       <Button
         variant="secondary"
         size="icon"
-        className="absolute bottom-4 right-4 h-10 w-10 rounded-full bg-black/50 hover:bg-black/70 text-white border-none shadow-lg transition-colors duration-200"
+        className="absolute bottom-4 right-4 h-10 w-10 rounded-full bg-black/50 hover:bg-black/70 text-white border-none shadow-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
         onClick={toggleMute}
       >
         {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}

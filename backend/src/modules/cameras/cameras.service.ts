@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, OnModuleInit, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OnvifService } from './onvif.service';
 import { TapoService } from './tapo.service';
 import { MediaMtxService } from './mediamtx.service';
 import { FfmpegService } from './ffmpeg.service';
+import { EventsGateway } from '../gateway/gateway.gateway';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 import { Camera, CameraType, UserRole } from '@prisma/client';
@@ -30,6 +31,8 @@ export class CamerasService implements OnModuleInit {
     private readonly tapoService: TapoService,
     private readonly mediaMtxService: MediaMtxService,
     private readonly ffmpegService: FfmpegService,
+    @Inject(forwardRef(() => EventsGateway))
+    private readonly eventsGateway: EventsGateway,
   ) {}
 
   async onModuleInit() {
@@ -343,6 +346,13 @@ export class CamerasService implements OnModuleInit {
         isOnline,
         lastSeenAt: isOnline ? new Date() : undefined,
       },
+    });
+
+    // Emit WebSocket event for real-time status update
+    this.eventsGateway.emitCameraStatus({
+      cameraId: id,
+      status: isOnline ? 'online' : 'offline',
+      timestamp: new Date(),
     });
   }
 

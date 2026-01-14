@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as dayjs from 'dayjs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EventsGateway } from '../gateway/gateway.gateway';
 import { UserRole, AuditAction, Recording, Prisma } from '@prisma/client';
 
 export interface TimelineEntry {
@@ -28,6 +29,8 @@ export class PlaybackService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    @Inject(forwardRef(() => EventsGateway))
+    private readonly eventsGateway: EventsGateway,
   ) {
     this.recordingsPath = this.configService.get<string>('RECORDINGS_PATH', '/recordings');
   }
@@ -255,7 +258,7 @@ export class PlaybackService implements OnModuleInit {
                 // e.g. "camera-id_aac/filename.mp4" or "camera-id/filename.mp4"
                 const relativeFolder = suffix ? `${camera.id}${suffix}` : camera.id;
                 
-                await this.prisma.recording.create({
+                const newRecording = await this.prisma.recording.create({
                   data: {
                     id: uuidv4(),
                     cameraId: camera.id,
@@ -265,7 +268,18 @@ export class PlaybackService implements OnModuleInit {
                     filePath: `${relativeFolder}/${path.basename(file)}`, 
                   }
                 });
+                
                 this.logger.debug(`Imported recording: ${file} for ${camera.name} (Source: ${suffix || 'Main'})`);
+
+                // Emit WebSocket event for new recording
+                this.eventsGateway.emitRecordingCompleted({
+                  recordingId: newRecording.id,
+                  cameraId: camera.id,
+                  startedAt: startTime,
+                  endedAt: endTime,
+                  fileSize: 0, // Could read file size if needed
+                  filePath: newRecording.filePath,
+                });
               }
             }
         }

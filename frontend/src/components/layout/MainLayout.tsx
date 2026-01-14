@@ -1,3 +1,4 @@
+```typescript
 import { ReactNode } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { NavBottom } from "./NavBottom";
@@ -15,9 +16,12 @@ export function MainLayout({ children }: MainLayoutProps) {
         <AppSidebar />
         <SidebarInset className="flex-1 flex flex-col overflow-hidden pb-20 md:pb-0">
           {/* Desktop Header with Trigger */}
-          <header className="hidden md:flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
+          <header className="hidden md:flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4 justify-between">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="-ml-1" />
+              <Separator orientation="vertical" className="mr-2 h-4" />
+            </div>
+            
           </header>
           
           {/* Mobile Header */}
