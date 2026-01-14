@@ -73,9 +73,9 @@ A robust, self-hosted CCTV Management Platform built with NestJS, React, and Med
     **http://localhost:7701**
 
     **Default Credentials:**
-    -   **Email:** `admin@example.com`
-    -   **Password:** `admin123`
-    *(Please change these immediately after logging in)*
+    -   **Email:** `admin@localhost`
+    -   **Username:** `admin`
+    -   **Password:** `changeme123`
 
 ## 📂 Project Structure
 
@@ -109,6 +109,12 @@ home-cam-hub/
 ### Database connection errors?
 -   Ensure the `DB_PASSWORD` in `infra/.env` matches the password used by the Postgres container.
 -   If you changed the password, you may need to delete the `postgres_data` volume to reset the DB: `docker volume rm infra_postgres_data`.
+
+## 🚧 Roadmap & Known Limitations
+
+-   [ ] **User Profile Management:** Change password and reset password functionality is not yet implemented.
+-   [ ] **Mobile App:** Native mobile application for iOS and Android.
+-   [ ] **Cloud Backup:** Optional cloud storage integration for critical events.
 
 ## 📄 License
 
