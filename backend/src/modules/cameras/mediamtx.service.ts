@@ -175,9 +175,10 @@ export class MediaMtxService {
       
       // Recording Settings
       record: enableRecording,
-      recordSegmentDuration: '10m', // Fix segments to 10 minutes
-      recordDeleteAfter: '7d', // Keep recordings for 7 days
-      // Default record path: /recordings/%path/%Y-%m-%d_%H-%M-%S
+      // Hierarchical directory structure: /{camera_uuid_aac}/{YYYY}/{MM}/{DD}/filename.mp4
+      recordPath: '/recordings/%path/%Y/%m/%d/%Y-%m-%d_%H-%M-%S',
+      recordSegmentDuration: '5m', // 5-minute segments for smaller file sizes
+      // Note: recordDeleteAfter removed - using scheduled cleanup service at 2 AM instead
     };
 
     await this.postConfig(aacPathName, aacConfig);

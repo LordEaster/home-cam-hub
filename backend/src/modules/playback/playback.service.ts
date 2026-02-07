@@ -218,74 +218,99 @@ export class PlaybackService implements OnModuleInit {
       const cameras = await this.prisma.camera.findMany();
       
       for (const camera of cameras) {
-        // We now record the AAC path, so files might be in a folder with suffix _aac
-        const possibleDirs = [
-            { dir: path.join(this.recordingsPath, camera.id), suffix: '' },
-            { dir: path.join(this.recordingsPath, `${camera.id}_aac`), suffix: '_aac' }
-        ];
-
-        for (const { dir: cameraDir, suffix } of possibleDirs) {
-            if (!fs.existsSync(cameraDir)) {
-              continue;
-            }
-    
-            const files = await fs.promises.readdir(cameraDir);
-            const mp4Files = files.filter(f => f.endsWith('.mp4'));
-    
-            for (const file of mp4Files) {
-              // Format: 2023-10-27_10-00-00.mp4
-              const basename = path.basename(file, '.mp4');
-              const [datePart, timePart] = basename.split('_');
-              if (!datePart || !timePart) continue;
-    
-              const hour = timePart.split('-')[0];
-              const minute = timePart.split('-')[1];
-              const second = timePart.split('-')[2];
-    
-              const startTime = dayjs(`${datePart}T${hour}:${minute}:${second}`).toDate();
-              const endTime = dayjs(startTime).add(1, 'hour').toDate(); // Assumed based on 1h config
-    
-              // Check if exists
-              const exists = await this.prisma.recording.findFirst({
-                 where: {
-                   cameraId: camera.id,
-                   startTime: startTime
-                 }
-              });
-    
-              if (!exists) {
-                // Store relative path including the correct folder (with or without _aac)
-                // e.g. "camera-id_aac/filename.mp4" or "camera-id/filename.mp4"
-                const relativeFolder = suffix ? `${camera.id}${suffix}` : camera.id;
-                
-                const newRecording = await this.prisma.recording.create({
-                  data: {
-                    id: uuidv4(),
-                    cameraId: camera.id,
-                    startTime,
-                    endTime,
-                    hasMotion: false,
-                    filePath: `${relativeFolder}/${path.basename(file)}`, 
-                  }
-                });
-                
-                this.logger.debug(`Imported recording: ${file} for ${camera.name} (Source: ${suffix || 'Main'})`);
-
-                // Emit WebSocket event for new recording
-                this.eventsGateway.emitRecordingCompleted({
-                  recordingId: newRecording.id,
-                  cameraId: camera.id,
-                  startedAt: startTime,
-                  endedAt: endTime,
-                  fileSize: 0, // Could read file size if needed
-                  filePath: newRecording.filePath,
-                });
-              }
-            }
+        // Recordings are now stored in: /{camera_id}_aac/{YYYY}/{MM}/{DD}/*.mp4
+        const cameraDir = path.join(this.recordingsPath, `${camera.id}_aac`);
+        
+        if (!fs.existsSync(cameraDir)) {
+          continue;
         }
+
+        // Recursively scan year/month/day directories
+        await this.scanRecordingsRecursively(camera.id, cameraDir, `${camera.id}_aac`);
       }
     } catch (error) {
       this.logger.error(`Failed to sync recordings: ${error.message}`);
+    }
+  }
+
+  /**
+   * Recursively scan directory for MP4 recordings
+   */
+  private async scanRecordingsRecursively(
+    cameraId: string,
+    dirPath: string,
+    relativePath: string
+  ): Promise<void> {
+    try {
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        const entryRelativePath = `${relativePath}/${entry.name}`;
+
+        if (entry.isDirectory()) {
+          // Recurse into subdirectories (year/month/day)
+          await this.scanRecordingsRecursively(cameraId, fullPath, entryRelativePath);
+        } else if (entry.isFile() && entry.name.endsWith('.mp4')) {
+          // Found an MP4 file - import it
+          await this.importRecordingFile(cameraId, entry.name, entryRelativePath);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to scan directory ${dirPath}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Import a single recording file into the database
+   */
+  private async importRecordingFile(
+    cameraId: string,
+    fileName: string,
+    filePath: string
+  ): Promise<void> {
+    // Format: YYYY-MM-DD_HH-MM-SS.mp4
+    const basename = path.basename(fileName, '.mp4');
+    const [datePart, timePart] = basename.split('_');
+    if (!datePart || !timePart) return;
+
+    const [hour, minute, second] = timePart.split('-');
+    if (!hour || !minute || !second) return;
+
+    const startTime = dayjs(`${datePart}T${hour}:${minute}:${second}`).toDate();
+    const endTime = dayjs(startTime).add(5, 'minute').toDate(); // 5-minute segments
+
+    // Check if exists
+    const exists = await this.prisma.recording.findFirst({
+      where: {
+        cameraId,
+        startTime,
+      },
+    });
+
+    if (!exists) {
+      const newRecording = await this.prisma.recording.create({
+        data: {
+          id: uuidv4(),
+          cameraId,
+          startTime,
+          endTime,
+          hasMotion: false,
+          filePath,
+        },
+      });
+
+      this.logger.debug(`Imported recording: ${fileName} for camera ${cameraId}`);
+
+      // Emit WebSocket event for new recording
+      this.eventsGateway.emitRecordingCompleted({
+        recordingId: newRecording.id,
+        cameraId,
+        startedAt: startTime,
+        endedAt: endTime,
+        fileSize: 0,
+        filePath: newRecording.filePath,
+      });
     }
   }
 

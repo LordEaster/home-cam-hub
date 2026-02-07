@@ -1,4 +1,3 @@
-```typescript
 import { ReactNode } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { NavBottom } from "./NavBottom";
